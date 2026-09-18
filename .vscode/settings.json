@@ -1,6 +1,6 @@
 {
     "python.testing.pytestArgs": [
-        "PRE_01_hola_mundo"
+        "PRE_02_mapreduce"
     ],
     "python.testing.unittestEnabled": false,
     "python.testing.pytestEnabled": true

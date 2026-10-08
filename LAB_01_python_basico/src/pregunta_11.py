@@ -1,3 +1,6 @@
+import pandas as pd
+
+
 def pregunta_11():
     """
     La cuarta columna (`codes`) contiene letras minúsculas separadas por
@@ -10,4 +13,27 @@ def pregunta_11():
         {"a": 122, "b": 49, "c": 91, ...}
     """
 
-    raise NotImplementedError
+    df = pd.read_csv(
+        "data/data.csv.gz",
+        header=None,
+        sep="\t",
+    )
+
+    acumulado = {}
+
+    # Recorremos la segunda columna (valores) y la cuarta (códigos)
+    for value, codes in zip(df[1], df[3]):
+        # Convertimos el valor a entero
+        val = int(value)
+        # Separamos las letras minúsculas por coma
+        letras = codes.split(",")
+        
+        for letra in letras:
+            acumulado[letra] = acumulado.get(letra, 0) + val
+
+    # Retornamos el diccionario ordenado alfabéticamente por clave
+    return dict(sorted(acumulado.items()))
+
+
+if __name__ == "__main__":
+    print(pregunta_11())

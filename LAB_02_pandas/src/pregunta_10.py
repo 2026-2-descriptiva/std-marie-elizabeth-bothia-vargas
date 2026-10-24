@@ -1,3 +1,6 @@
+import pandas as pd
+
+
 def pregunta_10():
     """
     Usando `data/tbl0.tsv`, construya para cada categoría de la columna `c1`
@@ -15,4 +18,19 @@ def pregunta_10():
         ...
     """
 
-    raise NotImplementedError
+    
+    df = pd.read_csv("data/tbl0.tsv", sep="\t")
+    
+    #  Agrupar  y ordenar cada grupo de 'c2' de menor a mayor, unirlos con ":" y convertir a DataFrame
+    df = (
+        df.groupby("c1")["c2"]
+        .apply(lambda x: ":".join(map(str, sorted(x))))
+        .to_frame("c2")
+        .sort_index()
+    )
+    
+    
+    return df
+
+if __name__ == "__main__":
+    print(pregunta_10())

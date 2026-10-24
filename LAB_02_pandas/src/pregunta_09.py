@@ -1,3 +1,6 @@
+import pandas as pd
+
+
 def pregunta_09():
     """
     Retorne la tabla `data/tbl0.tsv` completa con una columna adicional
@@ -13,4 +16,9 @@ def pregunta_09():
         ...
     """
 
-    raise NotImplementedError
+    df= pd.read_csv("data/tbl0.tsv", sep="\t")
+    # adicionar la columna year que contenga el año de la fecha de la columna 'c3` como un texto de cuatro caracteres
+    df["year"]= df["c3"].str[:4]
+    return df
+if __name__ in "__main__":
+    print(pregunta_09())

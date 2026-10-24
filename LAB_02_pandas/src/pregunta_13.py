@@ -1,3 +1,6 @@
+import pandas as pd
+
+
 def pregunta_13():
     """
     Combine las tablas `data/tbl0.tsv` y `data/tbl2.tsv` usando la columna
@@ -14,5 +17,17 @@ def pregunta_13():
         C     81
         ...
     """
+#cargar datos
+    df0=pd.read_csv("data/tbl0.tsv", sep="\t")
+    df2=pd.read_csv("data/tbl2.tsv", sep="\t")
+    
+    df_merged = pd.merge(df0, df2, on="c0")
+    
+    #  Agrupar por la columna 'c1', seleccionar 'c5b', sumar y ordenar el índice alfabéticamente
+    df = df_merged.groupby("c1")["c5b"].sum().sort_index()
+    
+   
+    return df
 
-    raise NotImplementedError
+if __name__ == "__main__":
+    print(pregunta_13())

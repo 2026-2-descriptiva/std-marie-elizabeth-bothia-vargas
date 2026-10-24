@@ -1,3 +1,6 @@
+import pandas as pd
+
+
 def pregunta_11():
     """
     En `data/tbl1.tsv`, cada valor de la columna `c0` aparece en varias
@@ -15,4 +18,17 @@ def pregunta_11():
         ...
     """
 
-    raise NotImplementedError
+    df=pd.read_csv("data/tbl1.tsv", sep="\t")
+    """ dataFrame con una fila por cada valor de `c0`, en orden ascendente, y las columnas `c0`
+    y `c4`. En `c4`, escriba las letras de ese `c0` ordenadas alfabéticamente
+    y separadas por comas
+    """
+    df= (
+        df.groupby("c0")["c4"]
+        .apply(lambda x: ",".join(sorted(x)))
+        .reset_index()
+    )
+      
+    return df
+if __name__ in "___main__":
+   print(pregunta_11())

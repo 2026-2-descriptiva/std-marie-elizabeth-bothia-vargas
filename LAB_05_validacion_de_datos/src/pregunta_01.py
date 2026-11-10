@@ -1,3 +1,9 @@
+
+import os
+import json
+import pandas as pd
+
+
 def main():
     """
     Antes de limpiar o analizar un conjunto de datos, un analista debe
@@ -47,5 +53,101 @@ def main():
           "country_values": [" Colombia ", "CO", ...]
         }
     """
+# Obtener rutas de forma robusta basadas en la ubicación de este archivo (src/)
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    file_path = os.path.join(base_dir, "data", "ventas.csv.gz")
+    output_filepath = os.path.join(base_dir, "submission", "data_quality_report.json")
 
-    raise NotImplementedError
+    # 1. Leer el archivo CSV comprimido sin modificar sus valores
+    df = pd.read_csv(file_path, compression='gzip', low_memory=False)
+
+    # 2. Normalizar los encabezados: minúsculas, limpiar espacios/BOM y reemplazar espacios internos por '_'
+    df.columns = (
+        df.columns.str.lower()
+        .str.strip()
+        .str.replace('\ufeff', '', regex=True)
+        .str.replace(r'\s+', '_', regex=True)
+    )
+
+    # Columnas requeridas
+    required_columns = [
+        'supplier_id', 'supplier', 'country', 'city', 
+        'purchase_date', 'amount', 'discount', 'weight', 
+        'units', 'unit_price', 'contact_email'
+    ]
+
+    actual_columns = list(df.columns)
+
+    # 3. Métricas básicas
+    row_count = len(df)
+    column_count = len(actual_columns)
+
+    # 4. Columnas requeridas faltantes e inesperadas
+    missing_required_columns = sorted([col for col in required_columns if col not in actual_columns])
+    unexpected_columns = sorted([col for col in actual_columns if col not in required_columns])
+
+    # 5. Filas duplicadas idénticas
+    duplicate_row_count = int(df.duplicated().sum())
+
+    # 6. Filas cuyo supplier_id aparece más de una vez
+    if 'supplier_id' in actual_columns:
+        duplicate_supplier_id_row_count = int(df['supplier_id'].duplicated(keep=False).sum())
+    else:
+        duplicate_supplier_id_row_count = 0
+
+    # 7. Valores faltantes por columna (vacíos, NaN o 'N/A')
+    missing_value_count_by_column = {}
+    for col in actual_columns:
+        s = df[col]
+        is_missing = s.isna() | (s.astype(str).str.strip().str.upper() == 'N/A')
+        missing_value_count_by_column[col] = int(is_missing.sum())
+
+    # 8. Correos inválidos (no cumplen usuario@dominio.extension)
+    if 'contact_email' in actual_columns:
+        email_pattern = r'^[^@\s]+@[^@\s]+\.[^@\s]+$'
+        valid_mask = df['contact_email'].astype(str).str.match(email_pattern, na=False)
+        invalid_email_count = int((~valid_mask).sum())
+    else:
+        invalid_email_count = 0
+
+    # 9. Unidades inválidas (no son enteros positivos)
+    if 'units' in actual_columns:
+        units_num = pd.to_numeric(df['units'], errors='coerce')
+        not_null = units_num.notna()
+        is_not_integer = not_null & (units_num % 1 != 0)
+        is_not_positive = not_null & (units_num <= 0)
+        invalid_unit_count = int((is_not_integer | is_not_positive).sum())
+    else:
+        invalid_unit_count = 0
+
+    # 10. Valores distintos de country
+    if 'country' in actual_columns:
+        unique_countries = df['country'].dropna().unique().tolist()
+        country_values = sorted([str(c) for c in unique_countries])
+    else:
+        country_values = []
+
+    # Construir el diccionario del reporte
+    report = {
+        "row_count": row_count,
+        "column_count": column_count,
+        "missing_required_columns": missing_required_columns,
+        "unexpected_columns": unexpected_columns,
+        "duplicate_row_count": duplicate_row_count,
+        "duplicate_supplier_id_row_count": duplicate_supplier_id_row_count,
+        "missing_value_count_by_column": missing_value_count_by_column,
+        "invalid_email_count": invalid_email_count,
+        "invalid_unit_count": invalid_unit_count,
+        "country_values": country_values
+    }
+
+    # Escribir el reporte en formato JSON en la carpeta submission
+    os.makedirs(os.path.dirname(output_filepath), exist_ok=True)
+    with open(output_filepath, 'w', encoding='utf-8') as f:
+        json.dump(report, f, ensure_ascii=False, indent=4)
+
+    return report
+
+if __name__ == "__main__":
+    main()
+    

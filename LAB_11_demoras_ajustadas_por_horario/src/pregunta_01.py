@@ -1,4 +1,6 @@
+
 import pandas as pd
+from pathlib import Path   
 
 
 def pregunta_01() -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -57,5 +59,104 @@ def pregunta_01() -> tuple[pd.DataFrame, pd.DataFrame]:
         EV,819223,...,1,1
         ...
     """
+    base_dir = Path(__file__).resolve().parent.parent
+    input_path = base_dir / "data" / "flights_by_carrier_day_hour.csv.gz"
+    output_dir = base_dir / "submission"
 
-    raise NotImplementedError
+    # 1. Cargar los datos
+    df = pd.read_csv(input_path)
+
+    # 2. Paso 1: Tasa nacional de demora por hora (0 a 23)
+    hourly_delay_rates = (
+        df.groupby("scheduled_departure_hour")
+        .agg(
+            operated_flights=("operated_flights", "sum"),
+            delayed_departure_15_flights=("delayed_departure_15_flights", "sum"),
+        )
+        .reindex(range(24), fill_value=0)
+        .reset_index()
+    )
+    hourly_delay_rates["delay_rate"] = (
+        hourly_delay_rates["delayed_departure_15_flights"]
+        / hourly_delay_rates["operated_flights"]
+    )
+    hourly_delay_rates = hourly_delay_rates[
+        [
+            "scheduled_departure_hour",
+            "operated_flights",
+            "delayed_departure_15_flights",
+            "delay_rate",
+        ]
+    ]
+
+    # 3. Paso 2: Demoras esperadas por aerolínea según su mezcla de horarios
+    df = df.merge(
+        hourly_delay_rates[["scheduled_departure_hour", "delay_rate"]],
+        on="scheduled_departure_hour",
+        how="left",
+    )
+    df["expected_delayed_flights"] = df["operated_flights"] * df["delay_rate"]
+
+    carrier_adjusted_delays = (
+        df.groupby("reporting_airline", as_index=False)
+        .agg(
+            operated_flights=("operated_flights", "sum"),
+            delayed_departure_15_flights=("delayed_departure_15_flights", "sum"),
+            expected_delayed_flights=("expected_delayed_flights", "sum"),
+        )
+    )
+
+    # Filtrar aerolíneas con al menos 100,000 vuelos operados
+    carrier_adjusted_delays = carrier_adjusted_delays[
+        carrier_adjusted_delays["operated_flights"] >= 100000
+    ].copy()
+
+    # Calcular tasa sin ajustar y razón observado / esperado
+    carrier_adjusted_delays["delay_rate"] = (
+        carrier_adjusted_delays["delayed_departure_15_flights"]
+        / carrier_adjusted_delays["operated_flights"]
+    )
+    carrier_adjusted_delays["observed_to_expected_ratio"] = (
+        carrier_adjusted_delays["delayed_departure_15_flights"]
+        / carrier_adjusted_delays["expected_delayed_flights"]
+    )
+
+    # 4. Paso 3: Calcular rankings (1 = peor aerolínea) y ordenar por adjusted_rank
+    carrier_adjusted_delays["crude_rank"] = (
+        carrier_adjusted_delays["delay_rate"]
+        .rank(method="min", ascending=False)
+        .astype(int)
+    )
+    carrier_adjusted_delays["adjusted_rank"] = (
+        carrier_adjusted_delays["observed_to_expected_ratio"]
+        .rank(method="min", ascending=False)
+        .astype(int)
+    )
+
+    carrier_adjusted_delays = (
+        carrier_adjusted_delays.sort_values(by="adjusted_rank", ascending=True)
+        .reset_index(drop=True)
+    )
+
+    # Asegurar el orden exacto de columnas
+    carrier_adjusted_delays = carrier_adjusted_delays[
+        [
+            "reporting_airline",
+            "operated_flights",
+            "delayed_departure_15_flights",
+            "delay_rate",
+            "expected_delayed_flights",
+            "observed_to_expected_ratio",
+            "crude_rank",
+            "adjusted_rank",
+        ]
+    ]
+
+    # 5. Guardar ambos archivos CSV sin índice y retornar las dos tablas
+    output_dir.mkdir(parents=True, exist_ok=True)
+    hourly_delay_rates.to_csv(output_dir / "hourly_delay_rates.csv", index=False)
+    carrier_adjusted_delays.to_csv(
+        output_dir / "carrier_adjusted_delays.csv", index=False
+    )
+
+    return hourly_delay_rates, carrier_adjusted_delays

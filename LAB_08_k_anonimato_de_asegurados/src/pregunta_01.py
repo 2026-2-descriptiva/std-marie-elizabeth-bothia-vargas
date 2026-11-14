@@ -1,3 +1,8 @@
+
+import json
+from pathlib import Path
+import pandas as pd
+
 def pregunta_01():
     """
     Una aseguradora quiere publicar datos de sus afiliados para que un grupo
@@ -79,5 +84,121 @@ def pregunta_01():
           ...
         }
     """
+    base_dir = Path(__file__).resolve().parent.parent
+    input_path = base_dir / "data" / "insurance.csv.gz"
+    output_dir = base_dir / "submission"
+    report_path = output_dir / "privacy_report.json"
+    published_path = output_dir / "insurance_published.csv"
 
-    raise NotImplementedError
+    # Cargar los datos originales
+    df = pd.read_csv(input_path)
+
+    # Calcular métricas originales (sin generalizar)
+    original_qis = ["age", "sex", "bmi", "children", "region"]
+    original_sizes = df.groupby(original_qis, observed=False).size()
+    original_k = int(original_sizes.min())
+    original_unique_records = int((original_sizes == 1).sum())
+
+    # Crear columnas generalizadas
+    df["age_group"] = pd.cut(
+        df["age"],
+        bins=[17, 29, 39, 49, 64],
+        labels=["18-29", "30-39", "40-49", "50-64"],
+    ).astype(str)
+
+    df["bmi_group"] = pd.cut(
+        df["bmi"],
+        bins=[0, 18.5, 25.0, 30.0, float("inf")],
+        labels=["bajo peso", "normal", "sobrepeso", "obesidad"],
+        right=False,  # Intervalos [a, b): incluye izquierda, excluye derecha
+    ).astype(str)
+
+    df["children_group"] = pd.cut(
+        df["children"],
+        bins=[-1, 0, 2, float("inf")],
+        labels=["0", "1-2", "3+"],
+    ).astype(str)
+
+    # Evaluar los dos esquemas
+    schemes_def = {
+        "with_children": ["age_group", "sex", "bmi_group", "children_group", "region"],
+        "without_children": ["age_group", "sex", "bmi_group", "region"],
+    }
+
+    schemes_report = {}
+    published_dfs = {}
+
+    for scheme_name, qis in schemes_def.items():
+        # Tamaño de clase por fila antes de suprimir
+        class_sizes = df.groupby(qis).transform("size")
+        group_counts = df.groupby(qis).size()
+
+        equivalence_classes = int(len(group_counts))
+        k_before_suppression = int(group_counts.min())
+
+        # Suprimir registros en clases con menos de k=5 registros
+        mask_published = class_sizes >= 5
+        suppressed_records = int((~mask_published).sum())
+        published_df = df[mask_published].copy()
+        published_records = int(len(published_df))
+
+        # Calcular clases publicadas y falta de diversidad en `smoker`
+        if published_records > 0:
+            smoker_nunique = published_df.groupby(qis)["smoker"].nunique()
+            published_classes = int(len(smoker_nunique))
+            classes_without_diversity = int((smoker_nunique == 1).sum())
+
+            # Contar cuántos registros publicados pertenecen a esas clases sin diversidad
+            class_smoker_nunique = published_df.groupby(qis)["smoker"].transform("nunique")
+            records_without_diversity = int((class_smoker_nunique == 1).sum())
+        else:
+            published_classes = 0
+            classes_without_diversity = 0
+            records_without_diversity = 0
+
+        schemes_report[scheme_name] = {
+            "quasi_identifiers": qis,
+            "equivalence_classes": equivalence_classes,
+            "k_before_suppression": k_before_suppression,
+            "suppressed_records": suppressed_records,
+            "published_records": published_records,
+            "published_classes": published_classes,
+            "classes_without_smoker_diversity": classes_without_diversity,
+            "records_without_smoker_diversity": records_without_diversity,
+        }
+        published_dfs[scheme_name] = published_df
+
+    # Seleccionar el esquema que suprime menos registros
+    selected_scheme = min(
+        schemes_report, key=lambda s: schemes_report[s]["suppressed_records"]
+    )
+    selected_qis = schemes_def[selected_scheme]
+    selected_df = published_dfs[selected_scheme]
+
+    # Calcular promedios de costo y tasas de fumadores
+    mean_charges_original = float(df["charges"].mean())
+    mean_charges_published = float(selected_df["charges"].mean())
+    smoker_rate_original = float((df["smoker"] == "yes").mean())
+    smoker_rate_published = float((selected_df["smoker"] == "yes").mean())
+
+    # Armar el reporte final
+    report = {
+        "original_k": original_k,
+        "original_unique_records": original_unique_records,
+        "schemes": schemes_report,
+        "selected_scheme": selected_scheme,
+        "mean_charges_original": mean_charges_original,
+        "mean_charges_published": mean_charges_published,
+        "smoker_rate_original": smoker_rate_original,
+        "smoker_rate_published": smoker_rate_published,
+    }
+
+    # Guardar JSON y CSV en `submission/`
+    output_dir.mkdir(parents=True, exist_ok=True)
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+
+    output_cols = selected_qis + ["smoker", "charges"]
+    selected_df[output_cols].to_csv(published_path, index=False)
+
+    return report  

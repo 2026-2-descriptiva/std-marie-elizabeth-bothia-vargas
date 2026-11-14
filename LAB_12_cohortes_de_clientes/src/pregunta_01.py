@@ -1,5 +1,10 @@
-import pandas as pd
+from pathlib import Path
+import matplotlib
 
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import pandas as pd
+import seaborn as sns
 
 def build_cohort_analysis() -> pd.DataFrame:
     """
@@ -43,5 +48,79 @@ def build_cohort_analysis() -> pd.DataFrame:
         2022-01,1,26,100,0.26
         ...
     """
+    base_dir = Path(__file__).resolve().parent.parent
+    sales_path = base_dir / "data" / "sales.csv.gz"
+    output_dir = base_dir / "submission"
 
-    raise NotImplementedError
+    # 1. Cargar los datos
+    sales_df = pd.read_csv(sales_path, parse_dates=["OrderDate"])
+
+    # 2. Calcular el mes de orden y el mes de primera compra (cohorte)
+    order_period = sales_df["OrderDate"].dt.to_period("M")
+    cohort_period = order_period.groupby(sales_df["CustomerID"]).transform("min")
+
+    sales_df["cohort_month"] = cohort_period.astype(str)
+    sales_df["period_index"] = (order_period - cohort_period).apply(lambda x: x.n)
+
+    # 3. Contar clientes activos por cohorte y período
+    cohort_data = (
+        sales_df.groupby(["cohort_month", "period_index"])["CustomerID"]
+        .nunique()
+        .reset_index(name="active_customers")
+    )
+
+    # 4. Calcular tamaño de cohorte (período 0) y tasa de retención
+    cohort_sizes = (
+        cohort_data[cohort_data["period_index"] == 0][
+            ["cohort_month", "active_customers"]
+        ]
+        .rename(columns={"active_customers": "cohort_size"})
+    )
+
+    cohort_data = cohort_data.merge(cohort_sizes, on="cohort_month", how="left")
+    cohort_data["retention_rate"] = (
+        cohort_data["active_customers"] / cohort_data["cohort_size"]
+    )
+
+    # Ordenar y seleccionar columnas exactas
+    cohort_data = (
+        cohort_data[
+            [
+                "cohort_month",
+                "period_index",
+                "active_customers",
+                "cohort_size",
+                "retention_rate",
+            ]
+        ]
+        .sort_values(["cohort_month", "period_index"])
+        .reset_index(drop=True)
+    )
+
+    # 5. Guardar el CSV en submission/
+    output_dir.mkdir(parents=True, exist_ok=True)
+    cohort_data.to_csv(output_dir / "cohort_retention.csv", index=False)
+
+    # 6. Construir y guardar el mapa de calor (valores no observados quedan como NaN -> vacíos)
+    retention_pivot = cohort_data.pivot(
+        index="cohort_month", columns="period_index", values="retention_rate"
+    )
+
+    plt.figure(figsize=(12, 8))
+    sns.heatmap(
+        retention_pivot,
+        annot=True,
+        fmt=".1%",
+        cmap="YlGnBu",
+        cbar_kws={"label": "Retention Rate"},
+        linewidths=0.5,
+        linecolor="gray",
+    )
+    plt.title("Cohort Retention Heatmap")
+    plt.xlabel("Period Index (Months)")
+    plt.ylabel("Cohort Month")
+    plt.tight_layout()
+    plt.savefig(output_dir / "cohort_retention_heatmap.png", dpi=150)
+    plt.close()
+
+    return cohort_data

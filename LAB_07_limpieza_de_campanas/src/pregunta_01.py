@@ -1,5 +1,5 @@
 import pandas as pd
-
+from pathlib import Path
 
 def clean_campaign_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
@@ -42,5 +42,84 @@ def clean_campaign_data() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         0,1,261,...,2022-05-13
         ...
     """
+    base_dir = Path(__file__).resolve().parent.parent
+    input_dir = base_dir / "data"
+    output_dir = base_dir / "submission"
 
-    raise NotImplementedError
+    #  Leer los archivos comprimidos y concatenarlos
+    archivos = sorted(input_dir.glob("bank-marketing-campaing-*.csv.gz"))
+    dataframes = [pd.read_csv(archivo, compression="gzip") for archivo in archivos]
+    full_data = pd.concat(dataframes, ignore_index=True)
+
+    # Crear y limpiar la tabla client
+    client = full_data[
+        [
+            "client_id",
+            "age",
+            "job",
+            "marital",
+            "education",
+            "credit_default",
+            "mortgage",
+        ]
+    ].copy()
+    client["job"] = (
+        client["job"]
+        .str.replace(".", "", regex=False)
+        .str.replace("-", "_", regex=False)
+    )
+    client["education"] = (
+        client["education"]
+        .replace("unknown", pd.NA)
+        .str.replace(".", "_", regex=False)
+    )
+    client["credit_default"] = (client["credit_default"] == "yes").astype(int)
+    client["mortgage"] = (client["mortgage"] == "yes").astype(int)
+
+    # Crear y limpiar la tabla campaign
+    campaign = full_data[
+        [
+            "client_id",
+            "number_contacts",
+            "contact_duration",
+            "previous_campaign_contacts",
+            "previous_outcome",
+            "campaign_outcome",
+            "month",
+            "day",
+        ]
+    ].copy()
+    campaign["previous_outcome"] = (
+        campaign["previous_outcome"] == "success"
+    ).astype(int)
+    campaign["campaign_outcome"] = (
+        campaign["campaign_outcome"] == "yes"
+    ).astype(int)
+    campaign["last_contact_date"] = pd.to_datetime(
+        "2022-" + campaign["month"].astype(str) + "-" + campaign["day"].astype(str),
+        format="%Y-%b-%d",
+    ).dt.strftime("%Y-%m-%d")
+    campaign = campaign[
+        [
+            "client_id",
+            "number_contacts",
+            "contact_duration",
+            "previous_campaign_contacts",
+            "previous_outcome",
+            "campaign_outcome",
+            "last_contact_date",
+        ]
+    ]
+
+    # Crear la tabla economics
+    economics = full_data[
+        ["client_id", "cons_price_idx", "euribor_three_months"]
+    ].copy()
+
+    # Guardar las tablas como CSV sin comprimir
+    output_dir.mkdir(parents=True, exist_ok=True)
+    client.to_csv(output_dir / "client.csv", index=False)
+    campaign.to_csv(output_dir / "campaign.csv", index=False)
+    economics.to_csv(output_dir / "economics.csv", index=False)
+
+    return client, campaign, economics
